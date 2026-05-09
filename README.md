@@ -19,8 +19,9 @@ notion_summary_server/
 | 도구 | 설명 |
 |------|------|
 | `save_summary_to_notion` | 요약 내용을 Notion DB에 새 페이지로 저장 |
+| `update_notion_page` | 기존 Notion 페이지에 내용 추가(append) |
 
-### 입력 파라미터
+### `save_summary_to_notion` 파라미터
 
 | 파라미터 | 타입 | 필수 | 설명 |
 |----------|------|------|------|
@@ -28,6 +29,14 @@ notion_summary_server/
 | `content` | string | ✅ | 요약 내용 |
 | `source_url` | string | ✅ | 원본 기사 또는 논문 URL |
 | `category` | `"stock"` \| `"paper"` | ✅ | 저장 대상 DB 선택 |
+
+### `update_notion_page` 파라미터
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|------|------|
+| `page_id` | string | ✅ | Notion 페이지 ID 또는 URL |
+| `content` | string | ✅ | 추가할 내용 |
+| `section_title` | string | ❌ | 섹션 제목 (입력 시 구분선과 함께 표시) |
 
 ---
 
