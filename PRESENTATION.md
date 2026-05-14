@@ -1,6 +1,23 @@
 # Impact Per Token v2
-## Hermes + MCP 자작 서버로 임팩트 끌어올리기
+## MCP 자작 서버로 임팩트 끌어올리기
 **제출자**: 진용 | **제출일**: 2026-05-14 | **GitHub**: notion_summary_server
+
+---
+
+## 사용 환경: Hermes 대신 Claude Code를 쓴 이유
+
+강의에서는 Hermes(OpenRouter 기반 유료 서비스)를 권장했지만, 이 프로젝트는 **Claude Code CLI**로 진행했습니다.
+
+| 항목 | Hermes | Claude Code |
+|------|--------|-------------|
+| 모델 | OpenRouter 경유 다양한 모델 | Claude (Anthropic 직접) |
+| MCP 연동 | Hermes UI에서 서버 등록 | `claude_desktop_config.json`에 서버 등록 |
+| Agent 구조 | Model + Harness | **동일** — Model + Harness |
+| 비용 | 유료 (OpenRouter 크레딧) | API 사용량 기준 |
+
+**핵심**: Hermes와 Claude Code는 **Agent 아키텍처가 동일**합니다.  
+둘 다 `Model + Harness` 구조이고, MCP 서버를 Tool Schema로 연결해 사용합니다.  
+Hermes 대신 Claude Code를 써도 이번 과제(MCP 서버 자작 + 실험)의 핵심 개념을 모두 검증할 수 있습니다.
 
 ---
 
@@ -10,8 +27,21 @@
 
 **목적**: Claude가 논문·주식 뉴스를 분석할 때마다 Notion에 자동 저장되지 않아 흩어지는 문제 해결
 
+**기술 스택**
+- `FastMCP` (Python) — MCP 서버 프레임워크
+- `httpx` — Notion API 비동기 HTTP 클라이언트
+- `Notion API v1` — 페이지 생성 / 블록 추가
+
 ```
-model → save_summary_to_notion(MCP) → Notion API → 3개 DB 자동 라우팅
+Claude Code (Model + Harness)
+    │
+    └── MCP Tool 호출: save_summary_to_notion
+            │
+            └── httpx → Notion API
+                    │
+                    ├── category="paper"         → AI 논문 DB
+                    ├── category="stock_research" → 주식 리서치 DB
+                    └── category="stock_study"    → 주식 공부노트 DB
 ```
 
 **구현 도구 2개**
