@@ -1,67 +1,138 @@
-"""발표 화면 1-B: MCP 있을 때 - 3가지 카테고리"""
-import asyncio, sys, time, io
+"""발표 화면 1-B: MCP 있을 때 — 실시간 수집 → Claude 요약 → Notion 자동 저장"""
+import asyncio, sys, time, io, httpx, xml.etree.ElementTree as ET
+from datetime import datetime
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.path.insert(0, 'd:/python/notion_summary_server')
 
-TASKS = [
-    {
-        "label":    "① AI 논문",
-        "title":    "[발표데모] Attention Is All You Need",
-        "content":  "Transformer 아키텍처 제안 논문. Self-attention만으로 RNN 없이 seq2seq 구현. BLEU 점수 SOTA 달성.",
-        "url":      "https://arxiv.org/abs/1706.03762",
-        "category": "paper",
-    },
-    {
-        "label":    "② 주식 리서치",
-        "title":    "[발표데모] 삼성전자 HBM3E 공급 확대",
-        "content":  "삼성전자 HBM3E 12단 공급 확대 발표. 주요 AI 고객사 3곳과 장기 공급 계약 체결. 연간 HBM 매출 80% 성장 전망.",
-        "url":      "https://demo.presentation/news",
-        "category": "stock_research",
-        "sub_category": "뉴스",
-        "tags":     ["반도체", "AI"],
-    },
-    {
-        "label":    "③ 주식 공부노트",
-        "title":    "[발표데모] PER (주가수익비율) 개념 정리",
-        "content":  "PER = 주가 / EPS. 동종 업종 평균 PER 대비 저평가 여부를 판단하는 지표. 성장주는 높은 PER도 정당화될 수 있음.",
-        "url":      "https://demo.presentation/study",
-        "category": "stock_study",
-        "sub_category": "지표",
-        "difficulty": "기초",
-        "tags":     ["금융"],
-    },
-]
+TODAY = datetime.now().strftime("%Y-%m-%d")
+
+
+async def claude_summarize(prompt: str) -> str:
+    proc = await asyncio.create_subprocess_exec(
+        'claude', '-p', prompt,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode('utf-8', errors='replace').strip()
+
+
+async def fetch_arxiv_paper() -> dict:
+    url = (
+        "https://export.arxiv.org/api/query"
+        "?search_query=cat:cs.AI+AND+cat:cs.LG"
+        "&start=0&max_results=1&sortBy=submittedDate&sortOrder=descending"
+    )
+    async with httpx.AsyncClient() as c:
+        r = await c.get(url, follow_redirects=True, timeout=15)
+    root = ET.fromstring(r.content)
+    ns = {'a': 'http://www.w3.org/2005/Atom'}
+    entry = root.find('a:entry', ns)
+    return {
+        "title":    entry.find('a:title', ns).text.strip().replace('\n', ' '),
+        "abstract": entry.find('a:summary', ns).text.strip().replace('\n', ' '),
+        "url":      entry.find('a:id', ns).text.strip(),
+    }
+
+
+async def fetch_yna_news(idx: int = 0) -> dict:
+    async with httpx.AsyncClient() as c:
+        r = await c.get("https://www.yna.co.kr/rss/economy.xml", follow_redirects=True, timeout=15)
+    root = ET.fromstring(r.content)
+    items = root.findall('.//item')
+    item = items[idx]
+    desc_elem = item.find('description')
+    return {
+        "title": item.find('title').text or "경제 뉴스",
+        "desc":  (desc_elem.text or "")[:400],
+        "url":   item.find('link').text or "https://www.yna.co.kr",
+    }
+
 
 async def main():
     from server import save_summary_to_notion
 
     print("=" * 50)
-    print("[ MCP 있을 때: 3가지 카테고리 자동 저장 ]")
+    print("[ MCP 있을 때: 실시간 수집 + Claude 요약 + Notion 저장 ]")
+    print(f"  실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
 
-    for task in TASKS:
-        print(f"\n{task['label']} 저장 중...")
-        t0 = time.perf_counter()
-        result = await save_summary_to_notion(
-            title=task["title"],
-            content=task["content"],
-            source_url=task["url"],
-            category=task["category"],
-            sub_category=task.get("sub_category", ""),
-            tags=task.get("tags"),
-            difficulty=task.get("difficulty", ""),
-        )
-        elapsed = time.perf_counter() - t0
-        # 결과에서 페이지 URL 줄만 출력
-        for line in result.splitlines():
-            if "완료" in line or "페이지" in line or "분류" in line:
-                print(f"  {line}")
-        print(f"  소요: {elapsed:.2f}초")
+    # ① AI 논문 (arxiv 최신)
+    print("\n① AI 논문 수집 중 (arxiv cs.AI)...")
+    paper = await fetch_arxiv_paper()
+    print(f"  제목: {paper['title'][:65]}...")
+    print("  요약 중 (Claude)...")
+    paper_summary = await claude_summarize(
+        f"다음 논문 초록을 한국어로 3줄 요약해주세요. 핵심 기여·방법·성과 순서로.\n\n{paper['abstract']}"
+    )
+    t0 = time.perf_counter()
+    result = await save_summary_to_notion(
+        title=f"[{TODAY}] {paper['title'][:60]}",
+        content=paper_summary,
+        source_url=paper['url'],
+        category="paper",
+    )
+    elapsed = time.perf_counter() - t0
+    for line in result.splitlines():
+        if "완료" in line or "페이지" in line or "분류" in line:
+            print(f"  {line}")
+    print(f"  소요: {elapsed:.2f}초")
+
+    # ② 주식 리서치 (연합뉴스 경제 최신)
+    print("\n② 주식 리서치 수집 중 (연합뉴스 경제)...")
+    news0 = await fetch_yna_news(0)
+    print(f"  제목: {news0['title'][:65]}")
+    print("  요약 중 (Claude)...")
+    research_summary = await claude_summarize(
+        f"투자자 관점에서 핵심 요약 → 시장 영향 → 투자 시사점 순으로 3줄 요약해주세요.\n\n"
+        f"제목: {news0['title']}\n내용: {news0['desc']}"
+    )
+    t0 = time.perf_counter()
+    result = await save_summary_to_notion(
+        title=f"[{TODAY}] {news0['title'][:60]}",
+        content=research_summary,
+        source_url=news0['url'],
+        category="stock_research",
+        sub_category="뉴스",
+        tags=["경제"],
+    )
+    elapsed = time.perf_counter() - t0
+    for line in result.splitlines():
+        if "완료" in line or "페이지" in line or "분류" in line:
+            print(f"  {line}")
+    print(f"  소요: {elapsed:.2f}초")
+
+    # ③ 주식 공부노트 (뉴스 키워드 → 투자 개념 설명)
+    print("\n③ 주식 공부노트 (뉴스 키워드 → 투자 개념 설명)...")
+    news1 = await fetch_yna_news(1)
+    print(f"  키워드 뉴스: {news1['title'][:65]}")
+    print("  개념 도출 중 (Claude)...")
+    concept = await claude_summarize(
+        f"다음 뉴스와 관련된 핵심 투자 개념 1가지를 골라, "
+        f"개념 정의 → 실제 사례 → 투자 적용법 순으로 초보자도 이해하게 설명해주세요.\n\n"
+        f"뉴스: {news1['title']}\n{news1['desc']}"
+    )
+    t0 = time.perf_counter()
+    result = await save_summary_to_notion(
+        title=f"[{TODAY}] 개념노트: {news1['title'][:45]}",
+        content=concept,
+        source_url=news1['url'],
+        category="stock_study",
+        sub_category="이론",
+        difficulty="기초",
+        tags=["경제"],
+    )
+    elapsed = time.perf_counter() - t0
+    for line in result.splitlines():
+        if "완료" in line or "페이지" in line or "분류" in line:
+            print(f"  {line}")
+    print(f"  소요: {elapsed:.2f}초")
 
     print()
     print("=" * 50)
-    print("  3개 DB에 자동 라우팅 완료")
-    print("  AI 논문 / 주식 리서치 / 주식 공부노트")
+    print("  실시간 수집 → Claude 요약 → 3개 DB 자동 라우팅 완료")
+    print("  arxiv 논문 / 연합뉴스 경제 / 투자 개념 노트")
     print("=" * 50)
+
 
 asyncio.run(main())
