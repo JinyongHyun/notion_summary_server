@@ -1,0 +1,12 @@
+"""발표 화면 1-A: MCP 없을 때"""
+print("=" * 50)
+print("[ MCP 없을 때 ]")
+print("=" * 50)
+print()
+print("Claude 답변:")
+print("삼성전자 HBM3E 12단 공급 확대 발표.")
+print("주요 AI 고객사 3곳과 장기 공급 계약 체결.")
+print("연간 HBM 매출 80% 성장 전망.")
+print()
+print("→ 텍스트만 출력됨. Notion 저장 없음.")
+print("→ 창 닫으면 사라짐. 수동 복사 필요.")

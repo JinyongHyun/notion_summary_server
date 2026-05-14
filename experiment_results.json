@@ -1,0 +1,80 @@
+{
+  "single": {
+    "pattern": "Single",
+    "total_elapsed": 6.879033800000002,
+    "items": [
+      {
+        "topic": "AI",
+        "elapsed": 1.488914500000078,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] AI 데이터센터 전력 수요 급증\n분류: 주식 리서치\n페이지: https://www.notion.s"
+      },
+      {
+        "topic": "반도체",
+        "elapsed": 1.0458433000000014,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] HBM4 양산 일정 앞당겨\n분류: 주식 리서치\n페이지: https://www.notion.so/0"
+      },
+      {
+        "topic": "금융",
+        "elapsed": 1.0427276000000347,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] 코스피 7000 돌파 임박, 증권사 수혜\n분류: 주식 리서치\n페이지: https://www.not"
+      }
+    ],
+    "token_estimate": 2550,
+    "failure_layer": "없음 (순차라 앞 실패 시 중단)"
+  },
+  "planner_executor": {
+    "pattern": "Planner+Executor",
+    "total_elapsed": 3.266008499999998,
+    "items": [
+      {
+        "topic": "AI",
+        "elapsed": 1.1492989000000762,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] AI 데이터센터 전력 수요 급증\n분류: 주식 리서치\n페이지: https://www.notion.s"
+      },
+      {
+        "topic": "반도체",
+        "elapsed": 0.9590306000000055,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] HBM4 양산 일정 앞당겨\n분류: 주식 리서치\n페이지: https://www.notion.so/0"
+      },
+      {
+        "topic": "금융",
+        "elapsed": 1.094504200000074,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] 코스피 7000 돌파 임박, 증권사 수혜\n분류: 주식 리서치\n페이지: https://www.not"
+      }
+    ],
+    "token_estimate": 2670,
+    "failure_layer": "Planner 실패 시 전체 중단 / Executor 단계별 격리 가능"
+  },
+  "parallel": {
+    "pattern": "Parallel",
+    "total_elapsed": 1.893670199999974,
+    "items": [
+      {
+        "topic": "AI",
+        "elapsed": 1.8562239000000318,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] AI 데이터센터 전력 수요 급증\n분류: 주식 리서치\n페이지: https://www.notion.s"
+      },
+      {
+        "topic": "반도체",
+        "elapsed": 1.486708599999929,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] HBM4 양산 일정 앞당겨\n분류: 주식 리서치\n페이지: https://www.notion.so/0"
+      },
+      {
+        "topic": "금융",
+        "elapsed": 1.1803290000000288,
+        "ok": true,
+        "result": "✅ Notion 저장 완료\n제목: [실험03] 코스피 7000 돌파 임박, 증권사 수혜\n분류: 주식 리서치\n페이지: https://www.not"
+      }
+    ],
+    "token_estimate": 2550,
+    "failure_layer": "개별 sub-agent 독립 실패 → 나머지 계속 진행"
+  }
+}
