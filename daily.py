@@ -28,15 +28,20 @@ ITEMS = [
     {"label": "④ 공부노트",     "db": "stock_study",    "check": f"[{TODAY}] 개념노트"},
 ]
 
+# DB 메타데이터 캐시 — 같은 DB에 대한 중복 GET 요청 방지
+_title_prop_cache: dict[str, str] = {}
+
 
 async def already_saved(client: httpx.AsyncClient, db_key: str, title_contains: str) -> bool:
     """해당 DB에 오늘 제목의 페이지가 이미 있는지 확인"""
     db_id = DB[db_key]
-    r = await client.get(f"https://api.notion.com/v1/databases/{db_id}", headers=HEADERS)
-    title_prop = next(
-        (name for name, p in r.json().get("properties", {}).items() if p.get("type") == "title"),
-        "Name"
-    )
+    if db_id not in _title_prop_cache:
+        r = await client.get(f"https://api.notion.com/v1/databases/{db_id}", headers=HEADERS)
+        _title_prop_cache[db_id] = next(
+            (name for name, p in r.json().get("properties", {}).items() if p.get("type") == "title"),
+            "Name"
+        )
+    title_prop = _title_prop_cache[db_id]
     r2 = await client.post(
         f"https://api.notion.com/v1/databases/{db_id}/query",
         headers=HEADERS,
@@ -63,12 +68,13 @@ async def _fetch_rss(client: httpx.AsyncClient, url: str, source: str, count: in
     root = ET.fromstring(r.content)
     result = []
     for item in root.findall('.//item')[:count]:
-        desc_elem = item.find('description')
-        desc = (desc_elem.text or "") if desc_elem is not None else ""
+        title_elem = item.find('title')
+        desc_elem  = item.find('description')
+        link_elem  = item.find('link')
         result.append({
-            "title":  item.find('title').text or "뉴스",
-            "desc":   desc[:300],
-            "url":    item.find('link').text or url,
+            "title":  title_elem.text if title_elem is not None else "뉴스",
+            "desc":   (desc_elem.text or "")[:300] if desc_elem is not None else "",
+            "url":    link_elem.text if link_elem is not None else url,
             "source": source,
         })
     return result
@@ -108,49 +114,17 @@ async def fetch_arxiv_paper() -> dict:
     }
 
 
-async def main():
-    from server import save_summary_to_notion
-
-    print(f"[{TODAY}] 일일 Notion 저장")
-    print("=" * 45)
-
-    # 1. 오늘 이미 저장된 항목 확인
-    print("저장 여부 확인 중...")
-    async with httpx.AsyncClient(timeout=30) as check_client:
-        exist_flags = await asyncio.gather(*[
-            already_saved(check_client, item["db"], item["check"]) for item in ITEMS
-        ])
-
-    skip = dict(zip([item["check"] for item in ITEMS], exist_flags))
-
-    for item, done in zip(ITEMS, exist_flags):
-        mark = "이미 저장됨" if done else "저장 필요"
-        print(f"  {item['label']:<14} {mark}")
-
-    need = [item for item, done in zip(ITEMS, exist_flags) if not done]
-    if not need:
-        print()
-        print(f"  오늘({TODAY}) 모두 이미 저장되어 있습니다.")
-        print("=" * 45)
-        return
-
-    # 2. 데이터 수집
-    print(f"\n데이터 수집 중...")
-    news_items, finance_items = await asyncio.gather(fetch_yna_items(5), fetch_finance_news(4))
+def _make_prompt(label: str, news_items: list, finance_items: list) -> str:
+    """항목별 Claude 프롬프트 생성 — 필요한 데이터만 참조"""
     news_text = "\n\n".join(f"[{i+1}] {n['title']}\n{n['desc']}" for i, n in enumerate(news_items))
     finance_text = "\n\n".join(
         f"[{i+1}] [{n['source']}] {n['title']}\n{n['desc']}"
         for i, n in enumerate(finance_items)
     )
-    print(f"  연합뉴스: {len(news_items)}건")
-    print(f"  한국경제·매일경제: {len(finance_items)}건")
+    first = news_items[0] if news_items else {"title": "(뉴스 없음)", "desc": ""}
 
-    # 3. 필요한 항목만 Claude 요약 생성 (병렬)
-    print(f"\nClaude 요약 생성 중 (필요한 {len(need)}개만)...")
-
-    prompts = {
-        # ① 뉴스 종합
-        ITEMS[0]["check"]: f"""다음 {len(news_items)}개 경제 뉴스를 투자자 관점에서 종합 분석해주세요.
+    if label.startswith("①"):
+        return f"""다음 {len(news_items)}개 경제 뉴스를 투자자 관점에서 종합 분석해주세요.
 
 형식 규칙:
 - ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
@@ -171,10 +145,10 @@ async def main():
 개인 투자자 입장에서 실질적으로 참고할 만한 내용을 서술해주세요.
 
 뉴스 목록:
-{news_text}""",
+{news_text}"""
 
-        # ② 주간브리핑
-        ITEMS[1]["check"]: f"""날짜: {TODAY}
+    if label.startswith("②"):
+        return f"""날짜: {TODAY}
 다음 뉴스를 바탕으로 주간 투자 브리핑을 작성해주세요.
 
 형식 규칙:
@@ -196,10 +170,10 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 리스크 관리와 관심 가져야 할 투자 포인트를 제시해주세요.
 
 뉴스 목록:
-{news_text}""",
+{news_text}"""
 
-        # ③ 증권사리포트
-        ITEMS[2]["check"]: f"""다음은 한국경제·매일경제의 금융·증권 뉴스입니다.
+    if label.startswith("③"):
+        return f"""다음은 한국경제·매일경제의 금융·증권 뉴스입니다.
 가장 주목할 기업 또는 섹터를 선정해 증권사 분석 리포트 형식으로 작성해주세요.
 
 형식 규칙:
@@ -223,10 +197,10 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 투자 시 주의해야 할 리스크 요인과 모니터링 포인트를 설명해주세요.
 
 뉴스 목록 (한국경제·매일경제):
-{finance_text}""",
+{finance_text}"""
 
-        # ④ 공부노트
-        ITEMS[3]["check"]: f"""다음 뉴스와 관련된 핵심 투자 개념 1가지를 골라 공부노트를 작성해주세요.
+    if label.startswith("④"):
+        return f"""다음 뉴스와 관련된 핵심 투자 개념 1가지를 골라 공부노트를 작성해주세요.
 
 형식 규칙:
 - ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
@@ -246,17 +220,76 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 이 개념을 실제 투자 의사결정에 어떻게 활용할 수 있는지 설명해주세요.
 
 뉴스:
-{news_items[0]['title']}
-{news_items[0]['desc']}""",
-    }
+{first['title']}
+{first['desc']}"""
 
-    need_keys = [item["check"] for item in need]
-    summaries_list = await asyncio.gather(*[claude_summarize(prompts[k]) for k in need_keys])
-    summaries = dict(zip(need_keys, summaries_list))
+    return ""
+
+
+async def main():
+    from server import save_summary_to_notion
+
+    print(f"[{TODAY}] 일일 Notion 저장")
+    print("=" * 45)
+
+    # 1. 오늘 이미 저장된 항목 확인 (DB 메타데이터 캐시 활용)
+    print("저장 여부 확인 중...")
+    async with httpx.AsyncClient(timeout=30) as check_client:
+        exist_flags = await asyncio.gather(*[
+            already_saved(check_client, item["db"], item["check"]) for item in ITEMS
+        ])
+
+    skip = dict(zip([item["check"] for item in ITEMS], exist_flags))
+
+    for item, done in zip(ITEMS, exist_flags):
+        print(f"  {item['label']:<14} {'이미 저장됨' if done else '저장 필요'}")
+
+    need = [item for item, done in zip(ITEMS, exist_flags) if not done]
+    if not need:
+        print(f"\n  오늘({TODAY}) 모두 이미 저장되어 있습니다.")
+        print("=" * 45)
+        return
+
+    # 2. 필요한 소스만 수집
+    need_labels = {item["label"][0] for item in need}  # {'①', '②', '③', '④'} 중 부분집합
+    need_yna     = bool(need_labels & {'①', '②', '④'})
+    need_finance = '③' in need_labels
+
+    print(f"\n데이터 수집 중...")
+    news_items, finance_items = [], []
+
+    gather_tasks = []
+    if need_yna:
+        gather_tasks.append(fetch_yna_items(5))
+    if need_finance:
+        gather_tasks.append(fetch_finance_news(4))
+
+    if gather_tasks:
+        collected = await asyncio.gather(*gather_tasks)
+        idx = 0
+        if need_yna:
+            news_items = collected[idx]; idx += 1
+        if need_finance:
+            finance_items = collected[idx]
+
+    if news_items:
+        print(f"  연합뉴스: {len(news_items)}건")
+    if finance_items:
+        print(f"  한국경제·매일경제: {len(finance_items)}건")
+
+    # 3. 필요한 항목만 Claude 요약 생성 (병렬)
+    print(f"\nClaude 요약 생성 중 (필요한 {len(need)}개만)...")
+    prompts = {
+        item["check"]: _make_prompt(item["label"], news_items, finance_items)
+        for item in need
+    }
+    summaries_list = await asyncio.gather(*[claude_summarize(prompts[item["check"]]) for item in need])
+    summaries = {item["check"]: s for item, s in zip(need, summaries_list)}
 
     # 4. Notion 저장
     print(f"\nNotion 저장 중...")
     saved = 0
+    first_news = news_items[0] if news_items else {"title": "", "url": "https://www.yna.co.kr"}
 
     for item in ITEMS:
         key = item["check"]
@@ -265,32 +298,34 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
             continue
 
         summary = summaries[key]
+        label = item["label"]
+        result = "❌ 저장 대상 없음"
 
-        if item["label"].startswith("①"):
+        if label.startswith("①"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 경제 뉴스 종합", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="뉴스",
                 source="연합뉴스", tags=["경제"],
             )
-        elif item["label"].startswith("②"):
+        elif label.startswith("②"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 주간 투자 브리핑", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="주간브리핑",
                 source="연합뉴스", tags=["경제"],
             )
-        elif item["label"].startswith("③"):
+        elif label.startswith("③"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 섹터 분석 리포트", content=summary,
                 source_url="https://www.hankyung.com/finance",
                 category="stock_research", sub_category="증권사리포트",
                 source="한국경제·매일경제", tags=["경제"],
             )
-        elif item["label"].startswith("④"):
+        elif label.startswith("④"):
             result = await save_summary_to_notion(
-                title=f"[{TODAY}] 개념노트: {news_items[0]['title'][:40]}",
-                content=summary, source_url=news_items[0]['url'],
+                title=f"[{TODAY}] 개념노트: {first_news['title'][:40]}",
+                content=summary, source_url=first_news['url'],
                 category="stock_study", sub_category="이론",
                 difficulty="기초", tags=["경제"],
             )
