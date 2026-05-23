@@ -1,4 +1,4 @@
-"""daily.py — 오늘 날짜 페이지가 없을 때만 Notion에 저장"""
+"""daily.py — 오늘 날짜 페이지가 없을 때만 Notion에 저장 (4개: 뉴스종합/주간브리핑/증권사리포트/공부노트)"""
 import asyncio, sys, io, httpx, xml.etree.ElementTree as ET, os
 from datetime import datetime
 from dotenv import load_dotenv
@@ -20,31 +20,29 @@ DB = {
     "stock_study":    os.getenv("NOTION_STOCK_STUDY_DB_ID",    "d1afcb876857487eb978c1a8e0952d05"),
 }
 
-# 오늘 저장할 5개 항목 정의
+# 오늘 저장할 4개 항목 (논문은 수동 첨부 시에만 별도 저장)
 ITEMS = [
-    {"label": "① AI 논문",       "db": "paper",          "check": f"[{TODAY}]"},
-    {"label": "② 뉴스 종합",     "db": "stock_research", "check": f"[{TODAY}] 경제 뉴스 종합"},
-    {"label": "③ 주간브리핑",    "db": "stock_research", "check": f"[{TODAY}] 주간 투자 브리핑"},
-    {"label": "④ 증권사리포트",  "db": "stock_research", "check": f"[{TODAY}] 섹터 분석 리포트"},
-    {"label": "⑤ 공부노트",      "db": "stock_study",    "check": f"[{TODAY}] 개념노트"},
+    {"label": "① 뉴스 종합",    "db": "stock_research", "check": f"[{TODAY}] 경제 뉴스 종합"},
+    {"label": "② 주간브리핑",   "db": "stock_research", "check": f"[{TODAY}] 주간 투자 브리핑"},
+    {"label": "③ 증권사리포트", "db": "stock_research", "check": f"[{TODAY}] 섹터 분석 리포트"},
+    {"label": "④ 공부노트",     "db": "stock_study",    "check": f"[{TODAY}] 개념노트"},
 ]
 
 
-async def already_saved(db_key: str, title_contains: str) -> bool:
+async def already_saved(client: httpx.AsyncClient, db_key: str, title_contains: str) -> bool:
     """해당 DB에 오늘 제목의 페이지가 이미 있는지 확인"""
     db_id = DB[db_key]
-    async with httpx.AsyncClient(timeout=15) as c:
-        r = await c.get(f"https://api.notion.com/v1/databases/{db_id}", headers=HEADERS)
-        title_prop = next(
-            (name for name, p in r.json().get("properties", {}).items() if p.get("type") == "title"),
-            "Name"
-        )
-        r2 = await c.post(
-            f"https://api.notion.com/v1/databases/{db_id}/query",
-            headers=HEADERS,
-            json={"filter": {"property": title_prop, "title": {"contains": title_contains}}}
-        )
-        return len(r2.json().get("results", [])) > 0
+    r = await client.get(f"https://api.notion.com/v1/databases/{db_id}", headers=HEADERS)
+    title_prop = next(
+        (name for name, p in r.json().get("properties", {}).items() if p.get("type") == "title"),
+        "Name"
+    )
+    r2 = await client.post(
+        f"https://api.notion.com/v1/databases/{db_id}/query",
+        headers=HEADERS,
+        json={"filter": {"property": title_prop, "title": {"contains": title_contains}}}
+    )
+    return len(r2.json().get("results", [])) > 0
 
 
 async def claude_summarize(prompt: str) -> str:
@@ -55,24 +53,6 @@ async def claude_summarize(prompt: str) -> str:
     )
     stdout, _ = await proc.communicate()
     return stdout.decode('utf-8', errors='replace').strip()
-
-
-async def fetch_arxiv_paper() -> dict:
-    url = (
-        "https://export.arxiv.org/api/query"
-        "?search_query=cat:cs.AI+AND+cat:cs.LG"
-        "&start=0&max_results=1&sortBy=submittedDate&sortOrder=descending"
-    )
-    async with httpx.AsyncClient() as c:
-        r = await c.get(url, follow_redirects=True, timeout=15)
-    root = ET.fromstring(r.content)
-    ns = {'a': 'http://www.w3.org/2005/Atom'}
-    entry = root.find('a:entry', ns)
-    return {
-        "title":    entry.find('a:title', ns).text.strip().replace('\n', ' '),
-        "abstract": entry.find('a:summary', ns).text.strip().replace('\n', ' '),
-        "url":      entry.find('a:id', ns).text.strip(),
-    }
 
 
 async def fetch_yna_items(count: int = 5) -> list[dict]:
@@ -91,17 +71,37 @@ async def fetch_yna_items(count: int = 5) -> list[dict]:
     return result
 
 
+async def fetch_arxiv_paper() -> dict:
+    """논문 수동 첨부 시 사용 (자동 실행 아님)"""
+    url = (
+        "https://export.arxiv.org/api/query"
+        "?search_query=cat:cs.AI+AND+cat:cs.LG"
+        "&start=0&max_results=1&sortBy=submittedDate&sortOrder=descending"
+    )
+    async with httpx.AsyncClient() as c:
+        r = await c.get(url, follow_redirects=True, timeout=15)
+    root = ET.fromstring(r.content)
+    ns = {'a': 'http://www.w3.org/2005/Atom'}
+    entry = root.find('a:entry', ns)
+    return {
+        "title":    entry.find('a:title', ns).text.strip().replace('\n', ' '),
+        "abstract": entry.find('a:summary', ns).text.strip().replace('\n', ' '),
+        "url":      entry.find('a:id', ns).text.strip(),
+    }
+
+
 async def main():
     from server import save_summary_to_notion
 
     print(f"[{TODAY}] 일일 Notion 저장")
     print("=" * 45)
 
-    # 1. 오늘 이미 저장된 항목 확인 (병렬)
+    # 1. 오늘 이미 저장된 항목 확인
     print("저장 여부 확인 중...")
-    exist_flags = await asyncio.gather(*[
-        already_saved(item["db"], item["check"]) for item in ITEMS
-    ])
+    async with httpx.AsyncClient(timeout=30) as check_client:
+        exist_flags = await asyncio.gather(*[
+            already_saved(check_client, item["db"], item["check"]) for item in ITEMS
+        ])
 
     skip = dict(zip([item["check"] for item in ITEMS], exist_flags))
 
@@ -118,131 +118,106 @@ async def main():
 
     # 2. 데이터 수집
     print(f"\n데이터 수집 중...")
-    paper, news_items = await asyncio.gather(fetch_arxiv_paper(), fetch_yna_items(5))
+    news_items = await fetch_yna_items(5)
     news_text = "\n\n".join(f"[{i+1}] {n['title']}\n{n['desc']}" for i, n in enumerate(news_items))
-    print(f"  arxiv: {paper['title'][:50]}...")
     print(f"  연합뉴스: {len(news_items)}건")
 
     # 3. 필요한 항목만 Claude 요약 생성 (병렬)
     print(f"\nClaude 요약 생성 중 (필요한 {len(need)}개만)...")
 
     prompts = {
-        # ① AI 논문 — 섹션 4개, 문단형, 이모지
-        ITEMS[0]["check"]: f"""다음 논문을 한국어로 리뷰해주세요.
+        # ① 뉴스 종합
+        ITEMS[0]["check"]: f"""다음 {len(news_items)}개 경제 뉴스를 투자자 관점에서 종합 분석해주세요.
 
 형식 규칙:
-- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 섹션명 ━━━" 형식만 사용
+- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
 - 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
-- 이모지를 자연스럽게 포함 (섹션 제목, 수치, 핵심 개념 강조에 활용)
+- 섹션 제목과 본문에 내용에 어울리는 이모지를 자유롭게 선택해 포함
 
-섹션 구성 (아래 순서대로):
-━━━ 🎯 연구 배경 ━━━
-이 논문이 해결하려는 문제와 기존 방법의 한계를 설명해주세요.
-
-━━━ 💡 핵심 아이디어 ━━━
-제안하는 방법론과 핵심 기여를 설명해주세요.
-
-━━━ 🔬 실험 및 결과 ━━━
-어떤 실험을 했고, 어떤 수치로 성능을 입증했는지 설명해주세요.
-
-━━━ ✨ 의의 및 한계 ━━━
-이 연구의 학술적·실용적 의의와 남은 한계점을 설명해주세요.
-
-논문 초록:
-{paper['abstract']}""",
-
-        # ② 뉴스 종합 — 섹션 4개, 투자자 관점
-        ITEMS[1]["check"]: f"""다음 {len(news_items)}개 경제 뉴스를 투자자 관점에서 종합 분석해주세요.
-
-형식 규칙:
-- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 섹션명 ━━━" 형식만 사용
-- 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
-- 이모지를 자연스럽게 포함
-
-섹션 구성:
-━━━ 📌 오늘의 핵심 ━━━
+섹션 구성 (4개):
+━━━ 오늘의 핵심 ━━━
 오늘 뉴스에서 가장 중요한 흐름 1~2가지를 짚어주세요.
 
-━━━ 📊 주요 이슈 분석 ━━━
+━━━ 주요 이슈 분석 ━━━
 각 뉴스의 배경과 맥락을 연결하여 설명해주세요.
 
-━━━ 📈 시장 영향 ━━━
+━━━ 시장 영향 ━━━
 이 이슈들이 주식·채권·환율 등 시장에 어떤 영향을 줄지 분석해주세요.
 
-━━━ 💼 투자 시사점 ━━━
+━━━ 투자 시사점 ━━━
 개인 투자자 입장에서 실질적으로 참고할 만한 내용을 서술해주세요.
 
 뉴스 목록:
 {news_text}""",
 
-        # ③ 주간브리핑 — 섹션 4개, 시장 전반
-        ITEMS[2]["check"]: f"""날짜: {TODAY}
+        # ② 주간브리핑
+        ITEMS[1]["check"]: f"""날짜: {TODAY}
 다음 뉴스를 바탕으로 주간 투자 브리핑을 작성해주세요.
 
 형식 규칙:
-- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 섹션명 ━━━" 형식만 사용
+- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
 - 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
-- 이모지를 자연스럽게 포함
+- 섹션 제목과 본문에 내용에 어울리는 이모지를 자유롭게 선택해 포함
 
-섹션 구성:
-━━━ 🌍 글로벌 시장 동향 ━━━
+섹션 구성 (4개):
+━━━ 글로벌 시장 동향 ━━━
 미국·중국 등 주요국의 경제 흐름과 이번 주 핵심 변수를 분석해주세요.
 
-━━━ 🇰🇷 국내 시장 동향 ━━━
+━━━ 국내 시장 동향 ━━━
 KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 
-━━━ 🔥 유망 섹터 ━━━
+━━━ 유망 섹터 ━━━
 이번 주 모멘텀이 있는 섹터 2~3개와 그 이유를 설명해주세요.
 
-━━━ 📋 이번 주 투자 전략 ━━━
+━━━ 이번 주 투자 전략 ━━━
 리스크 관리와 관심 가져야 할 투자 포인트를 제시해주세요.
 
 뉴스 목록:
 {news_text}""",
 
-        # ④ 증권사리포트 — 섹션 4개, 리포트 형식
-        ITEMS[3]["check"]: f"""다음 뉴스에서 가장 주목할 기업 또는 섹터를 선정해 증권사 분석 리포트를 작성해주세요.
+        # ③ 증권사리포트
+        ITEMS[2]["check"]: f"""다음 뉴스에서 가장 주목할 기업 또는 섹터를 선정해 증권사 분석 리포트를 작성해주세요.
 
 형식 규칙:
-- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 섹션명 ━━━" 형식만 사용
+- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
 - 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
-- 이모지를 자연스럽게 포함
+- 섹션 제목과 본문에 내용에 어울리는 이모지를 자유롭게 선택해 포함
 - 리포트 상단에 "선정 기업/섹터: ○○○" 한 줄 먼저 작성
 
-섹션 구성:
-━━━ 🏢 기업·섹터 현황 ━━━
+섹션 구성 (4개):
+━━━ 기업·섹터 현황 ━━━
 선정한 기업 또는 섹터의 최근 동향과 산업 내 위치를 설명해주세요.
 
-━━━ 💎 투자 포인트 ━━━
+━━━ 투자 포인트 ━━━
 이 기업·섹터에 주목해야 하는 핵심 이유 2~3가지를 설명해주세요.
 
-━━━ 📊 투자의견 ━━━
+━━━ 투자의견 ━━━
 현재 밸류에이션, 목표주가 수준, 투자의견(매수/중립/매도)을 제시해주세요.
 
-━━━ ⚠️ 리스크 요인 ━━━
+━━━ 리스크 요인 ━━━
 투자 시 주의해야 할 리스크 요인과 모니터링 포인트를 설명해주세요.
 
 뉴스 목록:
 {news_text[:800]}""",
 
-        # ⑤ 공부노트 — 섹션 3개, 개념 설명
-        ITEMS[4]["check"]: f"""다음 뉴스와 관련된 핵심 투자 개념 1가지를 골라 공부노트를 작성해주세요.
+        # ④ 공부노트
+        ITEMS[3]["check"]: f"""다음 뉴스와 관련된 핵심 투자 개념 1가지를 골라 공부노트를 작성해주세요.
 
 형식 규칙:
-- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 섹션명 ━━━" 형식만 사용
+- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
 - 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
-- 이모지를 자연스럽게 포함
+- 섹션 제목과 본문에 내용에 어울리는 이모지를 자유롭게 선택해 포함
 - 상단에 "오늘의 개념: ○○○" 한 줄 먼저 작성
 - 초보 투자자도 이해할 수 있도록 쉽게 설명
 
-섹션 구성:
-━━━ 📖 개념 정의 ━━━
+섹션 구성 (3개):
+━━━ 개념 정의 ━━━
 이 개념이 무엇인지, 왜 중요한지 설명해주세요.
 
-━━━ 📌 실제 사례 ━━━
+━━━ 실제 사례 ━━━
 뉴스 또는 최근 시장에서 이 개념이 적용된 구체적인 사례를 들어주세요.
 
-━━━ 💰 투자 적용법 ━━━
+━━━ 투자 적용법 ━━━
 이 개념을 실제 투자 의사결정에 어떻게 활용할 수 있는지 설명해주세요.
 
 뉴스:
@@ -268,31 +243,26 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 
         if item["label"].startswith("①"):
             result = await save_summary_to_notion(
-                title=f"[{TODAY}] {paper['title'][:60]}",
-                content=summary, source_url=paper['url'], category="paper",
-            )
-        elif item["label"].startswith("②"):
-            result = await save_summary_to_notion(
                 title=f"[{TODAY}] 경제 뉴스 종합", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="뉴스",
                 source="연합뉴스", tags=["경제"],
             )
-        elif item["label"].startswith("③"):
+        elif item["label"].startswith("②"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 주간 투자 브리핑", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="주간브리핑",
                 source="Claude 자동 수집", tags=["경제"],
             )
-        elif item["label"].startswith("④"):
+        elif item["label"].startswith("③"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 섹터 분석 리포트", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="증권사리포트",
                 source="Claude 자동 분석", tags=["경제"],
             )
-        elif item["label"].startswith("⑤"):
+        elif item["label"].startswith("④"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 개념노트: {news_items[0]['title'][:40]}",
                 content=summary, source_url=news_items[0]['url'],
