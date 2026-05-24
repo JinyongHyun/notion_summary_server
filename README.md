@@ -48,10 +48,12 @@ notion_summary_server/
 
 ### GitHub Actions 자동 실행
 
-- **스케줄**: 평일(월~금) 오전 09:00 KST
+- **스케줄**: 평일(월~금) 오전 09:00 KST (최대 30분 지연 가능)
+- **주말**: cron 스케줄 + 스크립트 내부 이중 차단
 - **공휴일**: 한국 공휴일 자동 감지 후 스킵 (`holidays` 라이브러리)
-- **수동 실행**: GitHub → Actions → Daily Notion Summary → Run workflow
+- **수동 실행**: GitHub → Actions → Daily Notion Summary → Run workflow (주말·공휴일엔 스킵)
 - **필요 Secrets**: `NOTION_API_KEY`, `ANTHROPIC_API_KEY`
+- **Node.js**: 24 강제 적용 (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`)
 
 ### 저장 항목 (3개)
 
