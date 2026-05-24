@@ -4,10 +4,16 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import anthropic
 import yfinance as yf
+import holidays
 
 load_dotenv()
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
+
+_kr_holidays = holidays.KR(years=datetime.now().year)
+if datetime.now().date() in _kr_holidays:
+    print(f"오늘({TODAY})은 한국 공휴일입니다. 건너뜁니다.")
+    sys.exit(0)
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
