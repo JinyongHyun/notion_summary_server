@@ -10,6 +10,10 @@ load_dotenv()
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 
+if datetime.now().weekday() >= 5:
+    print(f"오늘({TODAY})은 주말입니다. 건너뜁니다.")
+    sys.exit(0)
+
 _kr_holidays = holidays.KR(years=datetime.now().year)
 if datetime.now().date() in _kr_holidays:
     print(f"오늘({TODAY})은 한국 공휴일입니다. 건너뜁니다.")
