@@ -21,7 +21,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt yfinance
+        run: pip install -r requirements.txt
 
       - name: Run daily_action.py
         env:
