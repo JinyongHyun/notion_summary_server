@@ -2,7 +2,7 @@
 import asyncio, sys, httpx, xml.etree.ElementTree as ET, os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import anthropic
+import google.generativeai as genai
 import yfinance as yf
 import holidays
 
@@ -62,16 +62,15 @@ async def claude_summarize(prompt: str) -> str:
         "사용자가 제공한 자료만 종합해 최종 본문 텍스트만 출력하세요. "
         "페이지 생성, 저장, 업데이트, 링크 생성은 하지 않습니다."
     )
-    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    message = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        system=system_prompt,
-        messages=[{"role": "user", "content": prompt}],
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        system_instruction=system_prompt,
     )
-    summary = message.content[0].text.strip()
+    response = await model.generate_content_async(prompt)
+    summary = response.text.strip()
     if not summary:
-        raise RuntimeError("Claude 요약 결과가 비어 있어 Notion 저장을 중단합니다.")
+        raise RuntimeError("Gemini 요약 결과가 비어 있어 Notion 저장을 중단합니다.")
     return summary
 
 
