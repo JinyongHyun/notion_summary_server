@@ -77,25 +77,31 @@ async def claude_summarize(prompt: str) -> str:
     return summary
 
 
-async def _fetch_rss(client: httpx.AsyncClient, url: str, source: str, count: int) -> list[dict]:
-    try:
-        r = await client.get(url, follow_redirects=True, timeout=15,
-                             headers={"User-Agent": "Mozilla/5.0"})
-        root = ET.fromstring(r.content)
-        result = []
-        for item in root.findall('.//item')[:count]:
-            title_elem = item.find('title')
-            desc_elem  = item.find('description')
-            link_elem  = item.find('link')
-            result.append({
-                "title":  title_elem.text if title_elem is not None else "뉴스",
-                "desc":   (desc_elem.text or "")[:300] if desc_elem is not None else "",
-                "url":    link_elem.text if link_elem is not None else url,
-                "source": source,
-            })
-        return result
-    except Exception:
-        return []
+async def _fetch_rss(client: httpx.AsyncClient, url: str, source: str, count: int, retries: int = 2, retry_delay: float = 3.0) -> list[dict]:
+    for attempt in range(retries + 1):
+        try:
+            r = await client.get(url, follow_redirects=True, timeout=15,
+                                 headers={"User-Agent": "Mozilla/5.0"})
+            root = ET.fromstring(r.content)
+            result = []
+            for item in root.findall('.//item')[:count]:
+                title_elem = item.find('title')
+                desc_elem  = item.find('description')
+                link_elem  = item.find('link')
+                result.append({
+                    "title":  title_elem.text if title_elem is not None else "뉴스",
+                    "desc":   (desc_elem.text or "")[:300] if desc_elem is not None else "",
+                    "url":    link_elem.text if link_elem is not None else url,
+                    "source": source,
+                })
+            if result:
+                return result
+            # 0건이면 재시도
+        except Exception:
+            pass
+        if attempt < retries:
+            await asyncio.sleep(retry_delay)
+    return []
 
 
 async def fetch_yna_items(count: int = 5) -> list[dict]:
