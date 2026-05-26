@@ -38,7 +38,7 @@ notion_summary_server/
 | 구분 | 파일 | 실행 환경 | 용도 |
 |------|------|-----------|------|
 | 로컬 수동 실행 | `daily.py` | Windows (Anaconda) | PC에서 직접 실행 |
-| 자동화 | `daily_action.py` | GitHub Actions (Ubuntu) | 평일 09:00 KST 자동 실행 |
+| 자동화 | `daily_action.py` | GitHub Actions (Ubuntu) | 월·수·금 09:00 KST 자동 실행 |
 
 ### 로컬 실행 명령어
 
@@ -48,13 +48,14 @@ notion_summary_server/
 
 ### GitHub Actions 자동 실행
 
-- **스케줄**: 평일(월~금) 오전 09:00 KST (최대 30분 지연 가능)
-- **주말**: cron 스케줄 + 스크립트 내부 이중 차단
+- **스케줄**: 월·수·금 오전 09:00 KST (GitHub cron 최대 수 시간 지연 가능)
+- **실행일 외**: cron 스케줄 + 스크립트 내부 이중 차단 (화·목·주말 모두 스킵)
 - **공휴일**: 한국 공휴일 자동 감지 후 스킵 (`holidays` 라이브러리)
-- **수동 실행**: GitHub → Actions → Daily Notion Summary → Run workflow (주말·공휴일엔 스킵)
-- **필요 Secrets**: `NOTION_API_KEY`, `GEMINI_API_KEY`
+- **시간대**: KST(UTC+9) 기준으로 날짜·요일 계산
+- **수동 실행**: GitHub → Actions → Daily Notion Summary → Run workflow
+- **필요 Secrets**: `NOTION_API_KEY`, `ANTHROPIC_API_KEY`
 - **Node.js**: 24 강제 적용 (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'`)
-- **AI 모델**: Gemini 2.0 Flash (무료 티어 — 하루 1,500회 한도, 실사용 3회)
+- **AI 모델**: Claude Sonnet 4.6 (Anthropic API, 1회 약 $0.08, 월 약 $1.04)
 
 ### 저장 항목 (3개)
 
@@ -65,7 +66,7 @@ notion_summary_server/
 | ③ Claude 인사이트 | `[YYYY-MM-DD] Claude 인사이트` | 🔍 | 주식 리서치 |
 
 - 오늘 날짜 페이지가 이미 있으면 자동 스킵
-- 3개 항목 Gemini 요약 병렬 생성 후 순차 저장
+- 3개 항목 Claude 요약 병렬 생성 후 순차 저장
 
 ### 데이터 소스
 
@@ -136,7 +137,7 @@ D:\Anaconda3\envs\project\python.exe
 ### 의존성 설치
 
 ```powershell
-& "D:\Anaconda3\envs\project\python.exe" -m pip install httpx python-dotenv mcp yfinance holidays google-generativeai
+& "D:\Anaconda3\envs\project\python.exe" -m pip install httpx python-dotenv mcp yfinance holidays anthropic
 ```
 
 ### 환경변수 (.env)
