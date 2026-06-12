@@ -58,7 +58,7 @@
 & "D:\Anaconda3\envs\project\python.exe" "D:\projects\python\notion-finance-digest\daily.py"
 ```
 
-월·수·금만 실행. 한국 공휴일 자동 스킵. 오늘 날짜 페이지가 이미 있으면 항목별 스킵.
+화·금만 실행. 한국 공휴일 자동 스킵. 오늘 날짜 페이지가 이미 있으면 항목별 스킵.
 
 ### 자동 저장 항목 4개
 

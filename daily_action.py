@@ -13,8 +13,8 @@ KST = timezone(timedelta(hours=9))
 _now = datetime.now(KST)
 TODAY = _now.strftime("%Y-%m-%d")
 
-if _now.weekday() not in (0, 2, 4):
-    print(f"오늘({TODAY})은 실행일이 아닙니다 (월·수·금만 실행). 건너뜁니다.")
+if _now.weekday() not in (1, 4):
+    print(f"오늘({TODAY})은 실행일이 아닙니다 (화·금만 실행). 건너뜁니다.")
     sys.exit(0)
 
 _kr_holidays = holidays.KR(years=_now.year)
